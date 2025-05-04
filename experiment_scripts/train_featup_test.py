@@ -148,56 +148,66 @@ if __name__ == "__main__":
     
     
 
-    total_steps = 500
-    steps_til_summary = 10
+    total_steps = 2000
+    steps_til_summary = 500
 
     optim = torch.optim.Adam(lr=1e-4, params=feat_siren.parameters())
-
-    # let's just do one step for now
     model_input, _ = next(iter(original_img_dataloader))
-    lr_feat_ground_truth_in_matrix = jittered_feat_tensor
+    lr_feat_ground_truth_in_matrix = jittered_feat_tensor.detach()
+    print("lr_feat_ground_truth_in_matrix.shape: ", lr_feat_ground_truth_in_matrix.shape)
+    # input()
 
-    model_input, lr_feat_ground_truth_in_matrix = model_input.cuda(), lr_feat_ground_truth_in_matrix.cuda()
-    model_output, coords = feat_siren(model_input)
+    model_input = model_input.cuda()
+    lr_feat_ground_truth_in_matrix = lr_feat_ground_truth_in_matrix.cuda()
 
-    model_output_in_matrix = model_output.contiguous().view(1, 224, 224, dino_feat_dim) # reshape to (b, c, h, w)
-    model_output_in_matrix = model_output_in_matrix.permute(0, 3, 1, 2)
+    for step in range(total_steps):
+        
+        model_output, coords = feat_siren(model_input)
 
-    transformed_hr_feats = []
-    for idx in range(10):
-        selected_tp = {k: v[idx] for k, v in transform_params.items()}
-        transformed_hr_feats.append(apply_jitter(model_output_in_matrix, 30, selected_tp))
-        # max_pad = 30, temporarily hard-coded
+        model_output_in_matrix = model_output.contiguous().view(1, 224, 224, dino_feat_dim) # reshape to (b, c, h, w)
+        model_output_in_matrix = model_output_in_matrix.permute(0, 3, 1, 2)
 
-    transformed_hr_feats_in_matrix = torch.cat(transformed_hr_feats, dim=0)
-    print("transformed_hr_feats_in_matrix.shape: ", transformed_hr_feats_in_matrix.shape)
-    # should be (10, 224, 224, dino_feat_dim)
+        transformed_hr_feats = []
+        for idx in range(10):
+            selected_tp = {k: v[idx] for k, v in transform_params.items()}
+            transformed_hr_feats.append(apply_jitter(model_output_in_matrix, 30, selected_tp))
+            # max_pad = 30, temporarily hard-coded
 
-    pool = nn.AvgPool2d(kernel_size=16)
-    predicted_lr_feat_in_matrix = pool(transformed_hr_feats_in_matrix)
-    predicted_lr_feat_in_matrix = predicted_lr_feat_in_matrix.permute(0, 2, 3, 1)
-    predicted_lr_feat = predicted_lr_feat_in_matrix.view(10, 196, dino_feat_dim)
+        transformed_hr_feats_in_matrix = torch.cat(transformed_hr_feats, dim=0)
+        print("transformed_hr_feats_in_matrix.shape: ", transformed_hr_feats_in_matrix.shape)
+        # should be (10, 224, 224, dino_feat_dim)
 
-    print("predicted_lr_feat.shape: ", predicted_lr_feat.shape)
-    # should be (10, 196, dino_feat_dim)
-    lr_feat_ground_truth = lr_feat_ground_truth_in_matrix.contiguous().view(10, 196, dino_feat_dim)
-    print("lr_feat_ground_truth.shape: ", lr_feat_ground_truth.shape)
-    # should be (10, 196, dino_feat_dim)
+        pool = nn.AvgPool2d(kernel_size=16)
+        predicted_lr_feat_in_matrix = pool(transformed_hr_feats_in_matrix)
+        
+        print("predicted_lr_feat_in_matrix.shape: ", predicted_lr_feat_in_matrix.shape)
+        # should be (10, 384, 14, 14)
+        predicted_lr_feat = predicted_lr_feat_in_matrix.view(10, 196, dino_feat_dim)
 
-    loss = ((predicted_lr_feat - lr_feat_ground_truth)**2).mean()
-    print("loss: ", loss)
+        print("predicted_lr_feat.shape: ", predicted_lr_feat.shape)
+        # should be (10, 196, dino_feat_dim)
+        lr_feat_ground_truth = lr_feat_ground_truth_in_matrix.contiguous().view(10, 196, dino_feat_dim)
+        print("lr_feat_ground_truth.shape: ", lr_feat_ground_truth.shape)
+        # should be (10, 196, dino_feat_dim)
 
-    plot_feats(original_img_tensor, 
-               pool(model_output_in_matrix)[0, ...], 
-               model_output_in_matrix[0, ...])
-    
-    plot_feats(original_img_tensor, 
-               lr_feat_ground_truth_in_matrix[0, ...], 
-               transformed_hr_feats_in_matrix[0, ...])
+        loss = ((predicted_lr_feat - lr_feat_ground_truth)**2).mean()
+        print("loss: ", loss)
 
-    optim.zero_grad()
-    loss.backward()
-    optim.step()
+        if not step % steps_til_summary:
+            print("Step %d, Total loss %0.6f" % (step, loss))
+            print()
+
+            plot_feats(original_img_tensor, 
+                    pool(model_output_in_matrix)[0, ...], 
+                    model_output_in_matrix[0, ...])
+            
+            plot_feats(original_img_tensor, 
+                    lr_feat_ground_truth_in_matrix[0, ...], 
+                    pool(transformed_hr_feats_in_matrix)[0, ...])
+
+        optim.zero_grad()
+        loss.backward()
+        optim.step()
 
 
     

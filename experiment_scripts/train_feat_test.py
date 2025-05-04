@@ -225,7 +225,7 @@ def remove_axes(axes):
                 _remove_axes(ax)
     else:
         for ax in axes:
-            _remove_axes(ax)
+            _remove_axes(ax) 
 
 
 class TorchPCA(object):
