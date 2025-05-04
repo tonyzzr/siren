@@ -227,10 +227,11 @@ if __name__ == "__main__":
 
     # model_input, ground_truth = next(iter(dataloader))
 
-    model_input, _ = next(iter(hr_dataloader))
+    model_input, hr_ground_truth = next(iter(hr_dataloader))
     _, ground_truth = next(iter(lr_dataloader))
 
     model_input, ground_truth = model_input.cuda(), ground_truth.cuda()
+    hr_ground_truth = hr_ground_truth.cuda()
 
     for step in range(total_steps):
         model_output, coords = img_siren(model_input)
@@ -258,9 +259,13 @@ if __name__ == "__main__":
 
            
         loss = ((lr_model_output - ground_truth)**2).mean()
-        
+        hr_loss = ((model_output - hr_ground_truth)**2).mean()
+
         if not step % steps_til_summary:
             print("Step %d, Total loss %0.6f" % (step, loss))
+            print("Step %d, HR loss %0.6f" % (step, hr_loss))
+            print()
+
             img_grad = gradient(model_output, coords)
             img_laplacian = laplace(model_output, coords)
 
