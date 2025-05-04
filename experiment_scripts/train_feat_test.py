@@ -208,12 +208,13 @@ if __name__ == "__main__":
     # dataloader = DataLoader(cameraman, batch_size=1, pin_memory=True, num_workers=0)
 
     hr_feat = FeatureFitting(224, feat_path='./experiment_scripts/hr_feat.pt')
-    lr_feat = FeatureFitting(224, feat_path='./experiment_scripts/lr_feat.pt')
+    lr_feat = FeatureFitting(14, feat_path='./experiment_scripts/lr_feat.pt')
 
     hr_feat_dim = hr_feat.pixels.shape[-1]
     lr_feat_dim = lr_feat.pixels.shape[-1]
 
-    dataloader = DataLoader(lr_feat, batch_size=1, pin_memory=True, num_workers=0)
+    hr_dataloader = DataLoader(hr_feat, batch_size=1, pin_memory=True, num_workers=0)
+    lr_dataloader = DataLoader(lr_feat, batch_size=1, pin_memory=True, num_workers=0)
 
     img_siren = Siren(in_features=2, out_features=hr_feat_dim, hidden_features=hr_feat_dim, 
                     hidden_layers=3, outermost_linear=True)
@@ -224,7 +225,11 @@ if __name__ == "__main__":
 
     optim = torch.optim.Adam(lr=1e-4, params=img_siren.parameters())
 
-    model_input, ground_truth = next(iter(dataloader))
+    # model_input, ground_truth = next(iter(dataloader))
+
+    model_input, _ = next(iter(hr_dataloader))
+    _, ground_truth = next(iter(lr_dataloader))
+
     model_input, ground_truth = model_input.cuda(), ground_truth.cuda()
 
     for step in range(total_steps):
