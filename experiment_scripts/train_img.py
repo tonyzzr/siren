@@ -19,12 +19,12 @@ p.add_argument('--experiment_name', type=str, required=True,
 # General training options
 p.add_argument('--batch_size', type=int, default=1)
 p.add_argument('--lr', type=float, default=1e-4, help='learning rate. default=1e-4')
-p.add_argument('--num_epochs', type=int, default=10000,
+p.add_argument('--num_epochs', type=int, default=500,
                help='Number of epochs to train for.')
 
-p.add_argument('--epochs_til_ckpt', type=int, default=25,
+p.add_argument('--epochs_til_ckpt', type=int, default=100,
                help='Time interval in seconds until checkpoint is saved.')
-p.add_argument('--steps_til_summary', type=int, default=1000,
+p.add_argument('--steps_til_summary', type=int, default=10,
                help='Time interval in seconds until tensorboard summary is saved.')
 
 p.add_argument('--model_type', type=str, default='sine',
