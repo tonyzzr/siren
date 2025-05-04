@@ -130,3 +130,14 @@ dmypy.json
 
 # .pt file
 *.pt
+
+# Logs and checkpoints
+logs/
+*.tfevents.*
+*.pth
+*.ckpt
+
+# Audio files
+*.wav
+*.mp3
+*.ogg
