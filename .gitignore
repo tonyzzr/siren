@@ -129,4 +129,4 @@ dmypy.json
 .pyre/
 
 # .pt file
-.pt
+*.pt

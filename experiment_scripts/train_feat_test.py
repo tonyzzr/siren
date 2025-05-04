@@ -155,7 +155,7 @@ def get_cameraman_tensor(sidelength):
     )
 
     print(img.shape)
-    input()
+    # input()
 
     return img
 
@@ -185,11 +185,11 @@ class FeatureFitting(Dataset):
 class ImageFitting(Dataset):
     def __init__(self, sidelength):
         super().__init__()
-        img = get_cameraman_tensor(sidelength)
-        print(img.shape)
-        c, h, w = img.shape
+        self.img = get_cameraman_tensor(sidelength)
+        print(self.img.shape)
+        c, h, w = self.img.shape
 
-        self.pixels = img.permute(1, 2, 0).view(-1, c)
+        self.pixels = self.img.permute(1, 2, 0).view(-1, c)
         print(self.pixels.shape)
         # input()
         self.coords = get_mgrid(sidelength, 2)
@@ -202,6 +202,109 @@ class ImageFitting(Dataset):
             
         return self.coords, self.pixels
     
+import matplotlib.pyplot as plt
+from featup.util import pca, remove_axes
+from pytorch_lightning import seed_everything
+import torch
+import torch.nn.functional as F
+
+from sklearn.decomposition import PCA
+
+
+def _remove_axes(ax):
+    ax.xaxis.set_major_formatter(plt.NullFormatter())
+    ax.yaxis.set_major_formatter(plt.NullFormatter())
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
+def remove_axes(axes):
+    if len(axes.shape) == 2:
+        for ax1 in axes:
+            for ax in ax1:
+                _remove_axes(ax)
+    else:
+        for ax in axes:
+            _remove_axes(ax)
+
+
+class TorchPCA(object):
+
+    def __init__(self, n_components):
+        self.n_components = n_components
+
+    def fit(self, X):
+        self.mean_ = X.mean(dim=0)
+        unbiased = X - self.mean_.unsqueeze(0)
+        U, S, V = torch.pca_lowrank(unbiased, q=self.n_components, center=False, niter=4)
+        self.components_ = V.T
+        self.singular_values_ = S
+        return self
+
+    def transform(self, X):
+        t0 = X - self.mean_.unsqueeze(0)
+        projected = t0 @ self.components_.T
+        return projected
+
+def pca(image_feats_list, dim=3, fit_pca=None, use_torch_pca=True, max_samples=None):
+    device = image_feats_list[0].device
+
+    def flatten(tensor, target_size=None):
+        if target_size is not None and fit_pca is None:
+            tensor = F.interpolate(tensor, (target_size, target_size), mode="bilinear")
+        B, C, H, W = tensor.shape
+        return tensor.permute(1, 0, 2, 3).reshape(C, B * H * W).permute(1, 0).detach().cpu()
+
+    if len(image_feats_list) > 1 and fit_pca is None:
+        target_size = image_feats_list[0].shape[2]
+    else:
+        target_size = None
+
+    flattened_feats = []
+    for feats in image_feats_list:
+        flattened_feats.append(flatten(feats, target_size))
+    x = torch.cat(flattened_feats, dim=0)
+
+    # Subsample the data if max_samples is set and the number of samples exceeds max_samples
+    if max_samples is not None and x.shape[0] > max_samples:
+        indices = torch.randperm(x.shape[0])[:max_samples]
+        x = x[indices]
+
+    if fit_pca is None:
+        if use_torch_pca:
+            fit_pca = TorchPCA(n_components=dim).fit(x)
+        else:
+            fit_pca = PCA(n_components=dim).fit(x)
+
+    reduced_feats = []
+    for feats in image_feats_list:
+        x_red = fit_pca.transform(flatten(feats))
+        if isinstance(x_red, np.ndarray):
+            x_red = torch.from_numpy(x_red)
+        x_red -= x_red.min(dim=0, keepdim=True).values
+        x_red /= x_red.max(dim=0, keepdim=True).values
+        B, C, H, W = feats.shape
+        reduced_feats.append(x_red.reshape(B, H, W, dim).permute(0, 3, 1, 2).to(device))
+
+    return reduced_feats, fit_pca
+
+
+@torch.no_grad()
+def plot_feats(image, lr, hr):
+    assert len(image.shape) == len(lr.shape) == len(hr.shape) == 3
+    seed_everything(0)
+    [lr_feats_pca, hr_feats_pca], _ = pca([lr.unsqueeze(0), hr.unsqueeze(0)])
+    fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+    ax[0].imshow(image.permute(1, 2, 0).detach().cpu())
+    ax[0].set_title("Image")
+    ax[1].imshow(lr_feats_pca[0].permute(1, 2, 0).detach().cpu())
+    ax[1].set_title("Original Features")
+    ax[2].imshow(hr_feats_pca[0].permute(1, 2, 0).detach().cpu())
+    ax[2].set_title("Upsampled Features")
+    remove_axes(ax)
+
+    # plt.savefig('feat.jpg')
+    plt.show()
 
 if __name__ == "__main__":
     # cameraman = ImageFitting(256)
@@ -218,7 +321,7 @@ if __name__ == "__main__":
 
     img_siren = Siren(in_features=2, out_features=hr_feat_dim, hidden_features=hr_feat_dim, 
                     hidden_layers=3, outermost_linear=True)
-    img_siren.cuda()
+    img_siren.cuda() 
 
     total_steps = 500 # Since the whole image is our dataset, this just means 500 gradient descent steps.
     steps_til_summary = 10
@@ -273,8 +376,20 @@ if __name__ == "__main__":
             # axes[0].imshow(model_output.cpu().view(256,256).detach().numpy())
             # axes[1].imshow(img_grad.norm(dim=-1).cpu().view(256,256).detach().numpy())
             # axes[2].imshow(img_laplacian.cpu().view(256,256).detach().numpy())
-            # plt.savefig(f"step_{step}.jpg")
+            # # plt.savefig(f"step_{step}.jpg")
             # plt.show()
+
+            plot_feats(torch.randn(3, 224, 224), 
+                       pool(model_output_reshaped)[0, ...], 
+                       model_output_reshaped[0, ...])
+            
+            plot_feats(torch.randn(3, 224, 224), 
+                       ground_truth.contiguous().view(1, 14, 14, hr_feat_dim).permute(0, 3, 1, 2)[0, ...], 
+                       hr_ground_truth.contiguous().view(1, 224, 224, hr_feat_dim).permute(0, 3, 1, 2)[0, ...])
+            
+            # input()
+
+
 
         optim.zero_grad()
         loss.backward()
