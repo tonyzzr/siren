@@ -31,7 +31,6 @@ def apply_jitter(img, max_pad, transform_params):
     else:
         return cropped
 
-
 def sample_transform(use_flips, max_pad, max_zoom, h, w):
     if use_flips:
         flip = random.random() > .5
@@ -53,7 +52,6 @@ def sample_transform(use_flips, max_pad, max_zoom, h, w):
         "zoom": torch.tensor(zoom),
         "flip": torch.tensor(flip)
     }
-
 
 class JitteredImage(Dataset):
 
@@ -81,12 +79,70 @@ class JitteredImage(Dataset):
         transform_params = sample_transform(self.use_flips, self.max_pad, self.max_zoom, h, w)
         return apply_jitter(self.img, self.max_pad, transform_params).squeeze(0), transform_params
 
+def prepare_lr_feat_ground_truth(dino_backbone,
+                                    original_img_tensor,
+                                    n_jittered_imgs = 100,
+                                    batch_size = 10):
+
+    jittered_img_dataset = JitteredImage(original_img_tensor, length = n_jittered_imgs)
+    jittered_img_dataloader = DataLoader(jittered_img_dataset, 
+        batch_size=batch_size)
+    
+    transform_params_dict = defaultdict(list)
+    jittered_feat_list = []
+    for jittered_img, transform_params in jittered_img_dataloader:
+        with torch.no_grad():
+            jittered_feat_list.append(dino_backbone(jittered_img.cuda()).cpu())
+        for key, value in transform_params.items():
+            transform_params_dict[key].append(value)
+        del jittered_img, transform_params
+        
+    jittered_feat_tensor = torch.cat(jittered_feat_list, dim=0)
+    transform_params = {k: torch.cat(v, dim=0) for k, v in transform_params_dict.items()}
+
+
+    lr_feat_ground_truth_in_matrix = jittered_feat_tensor.detach()
+    lr_feat_ground_truth_in_matrix = lr_feat_ground_truth_in_matrix
+    print("lr_feat_ground_truth_in_matrix.shape: ", lr_feat_ground_truth_in_matrix.shape)
+
+    # lr_feat_ground_truth = lr_feat_ground_truth_in_matrix.contiguous().view(n_jittered_imgs, 196, dino_feat_dim)
+    # print("lr_feat_ground_truth.shape: ", lr_feat_ground_truth.shape)
+
+    return lr_feat_ground_truth_in_matrix, transform_params
+
+
+class ImageFittingColorFeat(Dataset):
+    '''
+        (x, y, r, g, b) as model input, shape: (1, 224*224, 5)
+    '''
+    def __init__(self, sidelength):
+        super().__init__()
+        self.img = get_cameraman_tensor(sidelength)
+        print("self.img.shape: ", self.img.shape)
+        c, h, w = self.img.shape
+
+        self.pixels = self.img.permute(1, 2, 0).view(-1, c)
+        print("self.pixels.shape: ", self.pixels.shape)
+        # input()
+        self.coords = get_mgrid(sidelength, 2)
+
+        self.combined_input_features = torch.cat([self.coords, self.pixels], dim=1)
+        print("self.combined_input_features.shape: ", self.combined_input_features.shape)
+
+    def __len__(self):
+        return 1
+
+    def __getitem__(self, idx):    
+        if idx > 0: raise IndexError
+            
+        return self.coords, self.pixels, self.combined_input_features
 
 if __name__ == "__main__":
 
     # step 0: prepare the original image
-    cameraman = ImageFitting(224)
-    coords, pixels = cameraman[0]
+    # cameraman = ImageFitting(224)
+    cameraman = ImageFittingColorFeat(224)
+    coords, pixels, combined_input_features = cameraman[0]
     original_img_tensor = cameraman.img
     original_img_dataloader = DataLoader(cameraman, 
                                          batch_size=1, 
@@ -94,48 +150,6 @@ if __name__ == "__main__":
                                          pin_memory=True,
                                          num_workers=0)
 
-    print("coords.shape: ", coords.shape)
-    print("pixels.shape: ", pixels.shape)
-    print("original_img_tensor.shape: ", original_img_tensor.shape)
-
-    # step 1: prepare a list of transformations
-    # step 2: apply the transformations to the original image
-    # to get jittered images -> dataset
-
-    def prepare_lr_feat_ground_truth(dino_backbone,
-                                     original_img_tensor,
-                                     n_jittered_imgs = 100,
-                                     batch_size = 10):
-
-        jittered_img_dataset = JitteredImage(original_img_tensor, length = n_jittered_imgs)
-        jittered_img_dataloader = DataLoader(jittered_img_dataset, 
-            batch_size=batch_size)
-        
-        transform_params_dict = defaultdict(list)
-        jittered_feat_list = []
-        for jittered_img, transform_params in jittered_img_dataloader:
-            with torch.no_grad():
-                jittered_feat_list.append(dino_backbone(jittered_img.cuda()).cpu())
-            for key, value in transform_params.items():
-                transform_params_dict[key].append(value)
-            del jittered_img, transform_params
-            
-        jittered_feat_tensor = torch.cat(jittered_feat_list, dim=0)
-        transform_params = {k: torch.cat(v, dim=0) for k, v in transform_params_dict.items()}
- 
-
-        lr_feat_ground_truth_in_matrix = jittered_feat_tensor.detach()
-        lr_feat_ground_truth_in_matrix = lr_feat_ground_truth_in_matrix
-        print("lr_feat_ground_truth_in_matrix.shape: ", lr_feat_ground_truth_in_matrix.shape)
-
-        # lr_feat_ground_truth = lr_feat_ground_truth_in_matrix.contiguous().view(n_jittered_imgs, 196, dino_feat_dim)
-        # print("lr_feat_ground_truth.shape: ", lr_feat_ground_truth.shape)
-
-        return lr_feat_ground_truth_in_matrix, transform_params
-    
-    # step 3: prepare a DINO featurizer, a Siren model, and a downsampler
-    # and the high-res model input (x, y) in shape of (1, 224*224, 2)
-    # and get the high-res feature (model output) in shape of (1, 224*224, feat_dim)
     
     # DINO featurizer
     from featup.featurizers.util import get_featurizer
@@ -145,18 +159,18 @@ if __name__ == "__main__":
     dino_backbone.cuda()
     dino_backbone.eval()
 
+    # prepare the low-res feature ground truths
     n_jittered_imgs = 3000
     batch_size = 10
-
     all_lr_feat_ground_truth, all_transform_params = prepare_lr_feat_ground_truth(dino_backbone, 
                                                                           original_img_tensor, 
                                                                           n_jittered_imgs = n_jittered_imgs, 
                                                                           batch_size = batch_size)
 
-   
 
     # Siren model
-    feat_siren = Siren(in_features=2, out_features=dino_feat_dim, 
+    feat_siren = Siren(in_features=combined_input_features.shape[1], 
+                       out_features=dino_feat_dim, 
                       hidden_features=dino_feat_dim, 
                       hidden_layers=3, 
                       outermost_linear=True)
@@ -168,15 +182,20 @@ if __name__ == "__main__":
     steps_til_summary = 200
 
     optim = torch.optim.Adam(lr=1e-4, params=feat_siren.parameters())
-    model_input, _ = next(iter(original_img_dataloader))
+    _, _, model_input = next(iter(original_img_dataloader))
     
     
     # input()
 
     model_input = model_input.cuda()
-    
+
+    from featup.downsamplers import SimpleDownsampler
+    downsampler = SimpleDownsampler(kernel_size=29, final_size=14)
+    downsampler.cuda()
 
     for step in tqdm(range(total_steps)):
+        feat_siren.train()
+        downsampler.train()
         
         # get the high-res feature (model output) in shape of (1, 244*244, dino_feat_dim)
         model_output, coords = feat_siren(model_input)
@@ -201,14 +220,11 @@ if __name__ == "__main__":
         # print("transformed_hr_feats_in_matrix.shape: ", transformed_hr_feats_in_matrix.shape)
         # should be (10, dino_feat_dim, 224, 224)
 
-        pool = nn.AvgPool2d(kernel_size=16)
-        predicted_lr_feat_in_matrix = pool(transformed_hr_feats_in_matrix)
-        # print("predicted_lr_feat_in_matrix.shape: ", predicted_lr_feat_in_matrix.shape)
-        # should be (10, 384, 14, 14)
+        # pool = nn.AvgPool2d(kernel_size=16)
+        # predicted_lr_feat_in_matrix = pool(transformed_hr_feats_in_matrix)
 
-        # predicted_lr_feat = predicted_lr_feat_in_matrix.view(batch_size, 196, dino_feat_dim)
-        # print("predicted_lr_feat.shape: ", predicted_lr_feat.shape)
-        # # should be (10, 196, dino_feat_dim)
+        predicted_lr_feat_in_matrix = downsampler(transformed_hr_feats_in_matrix, None)
+        print("predicted_lr_feat_in_matrix.shape: ", predicted_lr_feat_in_matrix.shape)
 
         loss = ((predicted_lr_feat_in_matrix - lr_feat_ground_truth_in_matrix)**2).mean()
         print("loss: ", loss)
@@ -218,12 +234,12 @@ if __name__ == "__main__":
             print()
 
             plot_feats(original_img_tensor, 
-                    pool(model_output_in_matrix)[0, ...], 
+                    downsampler(model_output_in_matrix, None)[0, ...], 
                     model_output_in_matrix[0, ...])
             
             plot_feats(original_img_tensor, 
                     lr_feat_ground_truth_in_matrix[0, ...], 
-                    pool(transformed_hr_feats_in_matrix)[0, ...])
+                    predicted_lr_feat_in_matrix[0, ...])
 
         optim.zero_grad()
         loss.backward()
