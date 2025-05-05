@@ -296,7 +296,13 @@ def hypernet_activation_summary(model, model_input, gt, model_output, writer, to
 
 def write_video_summary(vid_dataset, model, model_input, gt, model_output, writer, total_steps, prefix='train_'):
     resolution = vid_dataset.shape
-    frames = [0, 60, 120, 200]
+    # print("vid_dataset.shape: ", vid_dataset.shape)
+    # print("vid_dataset.channels: ", vid_dataset.channels)
+    # input()
+    # (n_frames, h, w)
+    # frames = [0, 60, 120, 200] # this is only valid for n_frames >= 200
+    frames = [int(frm_frac * resolution[0]) for frm_frac in [0, 0.25, 0.5, 0.75]] # temporary fix
+
     Nslice = 10
     with torch.no_grad():
         coords = [dataio.get_mgrid((1, resolution[1], resolution[2]), dim=3)[None,...].cuda() for f in frames]
@@ -304,19 +310,39 @@ def write_video_summary(vid_dataset, model, model_input, gt, model_output, write
             coords[idx][..., 0] = (f / (resolution[0] - 1) - 0.5) * 2
         coords = torch.cat(coords, dim=0)
 
-        output = torch.zeros(coords.shape)
+        # print("coords.shape: ", coords.shape)
+        # print("frames: ", frames)
+        # input()
+
+        # output = torch.zeros(coords.shape) 
+        # this is just a coincidence when vid_dataset.channels = 3
+        # simply because coords are (x, y, t)
+        output = torch.zeros(coords.shape[0], coords.shape[1], vid_dataset.channels)
+        # so the coords.shape[0] is the number of slices to visualize
+        # coords.shape[1] is the number of pixels
+        # we need the third dimension to be the number of channels in vid_dataset to match the ground truth
         split = int(coords.shape[1] / Nslice)
         for i in range(Nslice):
             pred = model({'coords':coords[:, i*split:(i+1)*split, :]})['model_out']
             output[:, i*split:(i+1)*split, :] =  pred.cpu()
+        # print("pred.shape: ", pred.shape)
+        # print("output.shape: ", output.shape)
+        # input()
 
-    pred_vid = output.view(len(frames), resolution[1], resolution[2], 3) / 2 + 0.5
+    
+    # pred_vid = output.view(len(frames), resolution[1], resolution[2], 3) / 2 + 0.5 # the channel dimension is hard-coded for 3 channels
+    pred_vid = output.view(len(frames), resolution[1], resolution[2], vid_dataset.channels) / 2 + 0.5
     pred_vid = torch.clamp(pred_vid, 0, 1)
     gt_vid = torch.from_numpy(vid_dataset.vid[frames, :, :, :])
     psnr = 10*torch.log10(1 / torch.mean((gt_vid - pred_vid)**2))
 
     pred_vid = pred_vid.permute(0, 3, 1, 2)
     gt_vid = gt_vid.permute(0, 3, 1, 2)
+
+    # check the shape of the video
+    # print("gt_vid.shape: ", gt_vid.shape)
+    # print("pred_vid.shape: ", pred_vid.shape)
+    # input()
 
     output_vs_gt = torch.cat((gt_vid, pred_vid), dim=-2)
     writer.add_image(prefix + 'output_vs_gt', make_grid(output_vs_gt, scale_each=False, normalize=True),

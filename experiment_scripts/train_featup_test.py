@@ -160,7 +160,7 @@ if __name__ == "__main__":
     dino_backbone.eval()
 
     # prepare the low-res feature ground truths
-    n_jittered_imgs = 3000
+    n_jittered_imgs = 100
     batch_size = 10
     all_lr_feat_ground_truth, all_transform_params = prepare_lr_feat_ground_truth(dino_backbone, 
                                                                           original_img_tensor, 
@@ -178,15 +178,11 @@ if __name__ == "__main__":
     
     
 
-    total_steps = 200
+    total_steps = 50
     steps_til_summary = 10
 
     optim = torch.optim.Adam(lr=1e-4, params=feat_siren.parameters())
     _, _, model_input = next(iter(original_img_dataloader))
-    
-    
-    # input()
-
     model_input = model_input.cuda()
 
     from featup.downsamplers import SimpleDownsampler

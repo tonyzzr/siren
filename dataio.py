@@ -448,7 +448,7 @@ class Video(Dataset):
         if 'npy' in path_to_video:
             self.vid = np.load(path_to_video)
         elif 'mp4' in path_to_video:
-            self.vid = skvideo.io.vread(path_to_video).astype(np.single) / 255.
+            self.vid = skvideo.io.vread(path_to_video).astype(np.float32) / 255.
 
         self.shape = self.vid.shape[:-1]
         self.channels = self.vid.shape[-1]
