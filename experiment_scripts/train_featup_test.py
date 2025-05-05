@@ -114,9 +114,11 @@ if __name__ == "__main__":
         transform_params_dict = defaultdict(list)
         jittered_feat_list = []
         for jittered_img, transform_params in jittered_img_dataloader:
-            jittered_feat_list.append(dino_backbone(jittered_img.cuda()).cpu())
+            with torch.no_grad():
+                jittered_feat_list.append(dino_backbone(jittered_img.cuda()).cpu())
             for key, value in transform_params.items():
                 transform_params_dict[key].append(value)
+            del jittered_img, transform_params
             
         jittered_feat_tensor = torch.cat(jittered_feat_list, dim=0)
         transform_params = {k: torch.cat(v, dim=0) for k, v in transform_params_dict.items()}
@@ -143,7 +145,7 @@ if __name__ == "__main__":
     dino_backbone.cuda()
     dino_backbone.eval()
 
-    n_jittered_imgs = 100
+    n_jittered_imgs = 3000
     batch_size = 10
 
     all_lr_feat_ground_truth, all_transform_params = prepare_lr_feat_ground_truth(dino_backbone, 
@@ -163,7 +165,7 @@ if __name__ == "__main__":
     
 
     total_steps = 2000
-    steps_til_summary = 500
+    steps_til_summary = 200
 
     optim = torch.optim.Adam(lr=1e-4, params=feat_siren.parameters())
     model_input, _ = next(iter(original_img_dataloader))
@@ -178,7 +180,6 @@ if __name__ == "__main__":
         
         # get the high-res feature (model output) in shape of (1, 244*244, dino_feat_dim)
         model_output, coords = feat_siren(model_input)
-
         model_output_in_matrix = model_output.contiguous().view(1, 224, 224, dino_feat_dim) # reshape to (b, c, h, w)
         model_output_in_matrix = model_output_in_matrix.permute(0, 3, 1, 2)
 
@@ -210,7 +211,7 @@ if __name__ == "__main__":
         # # should be (10, 196, dino_feat_dim)
 
         loss = ((predicted_lr_feat_in_matrix - lr_feat_ground_truth_in_matrix)**2).mean()
-        # print("loss: ", loss)
+        print("loss: ", loss)
 
         if not step % steps_til_summary:
             print("Step %d, Total loss %0.6f" % (step, loss))
