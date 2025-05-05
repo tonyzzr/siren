@@ -1,10 +1,12 @@
 from train_feat_test import *
 
 import random
-
+from tqdm import tqdm
 import torch
 import torch.nn.functional as F
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, RandomSampler
+
+from collections import defaultdict
 
 
 def apply_jitter(img, max_pad, transform_params):
@@ -100,12 +102,35 @@ if __name__ == "__main__":
     # step 2: apply the transformations to the original image
     # to get jittered images -> dataset
 
-    jittered_img_dataset = JitteredImage(original_img_tensor, length = 10)
-    jittered_img_dataloader = DataLoader(jittered_img_dataset, batch_size=10, shuffle=True)
-    # the returned items are (jittered_img, transform_params)
-    # print("jittered_img_dataloader: ", next(iter(jittered_img_dataloader)))
-    
+    def prepare_lr_feat_ground_truth(dino_backbone,
+                                     original_img_tensor,
+                                     n_jittered_imgs = 100,
+                                     batch_size = 10):
 
+        jittered_img_dataset = JitteredImage(original_img_tensor, length = n_jittered_imgs)
+        jittered_img_dataloader = DataLoader(jittered_img_dataset, 
+            batch_size=batch_size)
+        
+        transform_params_dict = defaultdict(list)
+        jittered_feat_list = []
+        for jittered_img, transform_params in jittered_img_dataloader:
+            jittered_feat_list.append(dino_backbone(jittered_img.cuda()).cpu())
+            for key, value in transform_params.items():
+                transform_params_dict[key].append(value)
+            
+        jittered_feat_tensor = torch.cat(jittered_feat_list, dim=0)
+        transform_params = {k: torch.cat(v, dim=0) for k, v in transform_params_dict.items()}
+ 
+
+        lr_feat_ground_truth_in_matrix = jittered_feat_tensor.detach()
+        lr_feat_ground_truth_in_matrix = lr_feat_ground_truth_in_matrix
+        print("lr_feat_ground_truth_in_matrix.shape: ", lr_feat_ground_truth_in_matrix.shape)
+
+        # lr_feat_ground_truth = lr_feat_ground_truth_in_matrix.contiguous().view(n_jittered_imgs, 196, dino_feat_dim)
+        # print("lr_feat_ground_truth.shape: ", lr_feat_ground_truth.shape)
+
+        return lr_feat_ground_truth_in_matrix, transform_params
+    
     # step 3: prepare a DINO featurizer, a Siren model, and a downsampler
     # and the high-res model input (x, y) in shape of (1, 224*224, 2)
     # and get the high-res feature (model output) in shape of (1, 224*224, feat_dim)
@@ -116,28 +141,17 @@ if __name__ == "__main__":
                                    activation_type='token', 
                                    output_root='.')
     dino_backbone.cuda()
+    dino_backbone.eval()
 
+    n_jittered_imgs = 100
+    batch_size = 10
 
-    # jittered low-res features ground truth
-    # step 4: load images to a dataloader, and randomly
-    # sample a batch of 10 jittered images
-    from collections import defaultdict
+    all_lr_feat_ground_truth, all_transform_params = prepare_lr_feat_ground_truth(dino_backbone, 
+                                                                          original_img_tensor, 
+                                                                          n_jittered_imgs = n_jittered_imgs, 
+                                                                          batch_size = batch_size)
 
-    transform_params_dict = defaultdict(list)
-    jittered_feat_list = []
-
-    # step 5: feed the jittered images to the DINO featurizer
-    # and get the low-res feature ground truth in shape of
-    # (batch_size, feat_dim, 14, 14)
-    for jittered_img, transform_params in jittered_img_dataloader:
-        jittered_feat_list.append(dino_backbone(jittered_img.cuda()))
-        for key, value in transform_params.items():
-            transform_params_dict[key].append(value)
-    jittered_feat_tensor = torch.cat(jittered_feat_list, dim=0)
-    transform_params = {k: torch.cat(v, dim=0) for k, v in transform_params_dict.items()}
-
-    print("jittered_feat_tensor.shape: ", jittered_feat_tensor.shape)
-    print("transform_params: ", transform_params)
+   
 
     # Siren model
     feat_siren = Siren(in_features=2, out_features=dino_feat_dim, 
@@ -153,45 +167,50 @@ if __name__ == "__main__":
 
     optim = torch.optim.Adam(lr=1e-4, params=feat_siren.parameters())
     model_input, _ = next(iter(original_img_dataloader))
-    lr_feat_ground_truth_in_matrix = jittered_feat_tensor.detach()
-    print("lr_feat_ground_truth_in_matrix.shape: ", lr_feat_ground_truth_in_matrix.shape)
+    
+    
     # input()
 
     model_input = model_input.cuda()
-    lr_feat_ground_truth_in_matrix = lr_feat_ground_truth_in_matrix.cuda()
+    
 
-    for step in range(total_steps):
+    for step in tqdm(range(total_steps)):
         
+        # get the high-res feature (model output) in shape of (1, 244*244, dino_feat_dim)
         model_output, coords = feat_siren(model_input)
 
         model_output_in_matrix = model_output.contiguous().view(1, 224, 224, dino_feat_dim) # reshape to (b, c, h, w)
         model_output_in_matrix = model_output_in_matrix.permute(0, 3, 1, 2)
 
-        transformed_hr_feats = []
-        for idx in range(10):
-            selected_tp = {k: v[idx] for k, v in transform_params.items()}
-            transformed_hr_feats.append(apply_jitter(model_output_in_matrix, 30, selected_tp))
-            # max_pad = 30, temporarily hard-coded
+        # prepare the low-res feature ground truths; and apply selected transformations to the high-res feature
+        lr_feat_ground_truth_in_matrix_list = []
+        transformed_hr_feats_in_matrix_list = []
+        for j in range(batch_size):
+            idx = torch.randint(n_jittered_imgs, size=())
+            lr_feat_ground_truth_in_matrix_list.append(all_lr_feat_ground_truth[idx].unsqueeze(0).cuda())
+            selected_tp = {k: v[idx] for k, v in all_transform_params.items()}
 
-        transformed_hr_feats_in_matrix = torch.cat(transformed_hr_feats, dim=0)
-        print("transformed_hr_feats_in_matrix.shape: ", transformed_hr_feats_in_matrix.shape)
-        # should be (10, 224, 224, dino_feat_dim)
+            # print("selected_tp: ", selected_tp) # should be different for each batch
+
+            transformed_hr_feats_in_matrix_list.append(apply_jitter(model_output_in_matrix, 30, selected_tp))
+            # max_pad = 30, temporarily hard-coded
+        lr_feat_ground_truth_in_matrix = torch.cat(lr_feat_ground_truth_in_matrix_list, dim=0)
+        transformed_hr_feats_in_matrix = torch.cat(transformed_hr_feats_in_matrix_list, dim=0)
+        # print("lr_feat_ground_truth_in_matrix.shape: ", lr_feat_ground_truth_in_matrix.shape)
+        # print("transformed_hr_feats_in_matrix.shape: ", transformed_hr_feats_in_matrix.shape)
+        # should be (10, dino_feat_dim, 224, 224)
 
         pool = nn.AvgPool2d(kernel_size=16)
         predicted_lr_feat_in_matrix = pool(transformed_hr_feats_in_matrix)
-        
-        print("predicted_lr_feat_in_matrix.shape: ", predicted_lr_feat_in_matrix.shape)
+        # print("predicted_lr_feat_in_matrix.shape: ", predicted_lr_feat_in_matrix.shape)
         # should be (10, 384, 14, 14)
-        predicted_lr_feat = predicted_lr_feat_in_matrix.view(10, 196, dino_feat_dim)
 
-        print("predicted_lr_feat.shape: ", predicted_lr_feat.shape)
-        # should be (10, 196, dino_feat_dim)
-        lr_feat_ground_truth = lr_feat_ground_truth_in_matrix.contiguous().view(10, 196, dino_feat_dim)
-        print("lr_feat_ground_truth.shape: ", lr_feat_ground_truth.shape)
-        # should be (10, 196, dino_feat_dim)
+        # predicted_lr_feat = predicted_lr_feat_in_matrix.view(batch_size, 196, dino_feat_dim)
+        # print("predicted_lr_feat.shape: ", predicted_lr_feat.shape)
+        # # should be (10, 196, dino_feat_dim)
 
-        loss = ((predicted_lr_feat - lr_feat_ground_truth)**2).mean()
-        print("loss: ", loss)
+        loss = ((predicted_lr_feat_in_matrix - lr_feat_ground_truth_in_matrix)**2).mean()
+        # print("loss: ", loss)
 
         if not step % steps_til_summary:
             print("Step %d, Total loss %0.6f" % (step, loss))
@@ -207,7 +226,7 @@ if __name__ == "__main__":
 
         optim.zero_grad()
         loss.backward()
-        optim.step()
+        optim.step()#
 
 
     
