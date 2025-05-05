@@ -172,14 +172,14 @@ if __name__ == "__main__":
     feat_siren = Siren(in_features=combined_input_features.shape[1], 
                        out_features=dino_feat_dim, 
                       hidden_features=dino_feat_dim, 
-                      hidden_layers=3, 
+                      hidden_layers=2, 
                       outermost_linear=True)
     feat_siren.cuda()
     
     
 
-    total_steps = 2000
-    steps_til_summary = 200
+    total_steps = 200
+    steps_til_summary = 10
 
     optim = torch.optim.Adam(lr=1e-4, params=feat_siren.parameters())
     _, _, model_input = next(iter(original_img_dataloader))
