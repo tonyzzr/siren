@@ -141,3 +141,6 @@ logs/
 *.wav
 *.mp3
 *.ogg
+
+# numpy files
+*.npy

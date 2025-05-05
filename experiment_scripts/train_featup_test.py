@@ -115,9 +115,12 @@ class ImageFittingColorFeat(Dataset):
     '''
         (x, y, r, g, b) as model input, shape: (1, 224*224, 5)
     '''
-    def __init__(self, sidelength):
+    def __init__(self, sidelength, img_tensor:torch.Tensor|None=None):
         super().__init__()
-        self.img = get_cameraman_tensor(sidelength)
+        if img_tensor is None:
+            self.img = get_cameraman_tensor(sidelength)
+        else:
+            self.img = img_tensor
         print("self.img.shape: ", self.img.shape)
         c, h, w = self.img.shape
 
@@ -137,11 +140,13 @@ class ImageFittingColorFeat(Dataset):
             
         return self.coords, self.pixels, self.combined_input_features
 
-if __name__ == "__main__":
+def train_featup(cameraman:ImageFittingColorFeat, do_plot:bool=False):
+    '''
+        cameraman should be with size of 224x224.
+    '''
 
     # step 0: prepare the original image
-    # cameraman = ImageFitting(224)
-    cameraman = ImageFittingColorFeat(224)
+    # cameraman = ImageFittingColorFeat(224)
     coords, pixels, combined_input_features = cameraman[0]
     original_img_tensor = cameraman.img
     original_img_dataloader = DataLoader(cameraman, 
@@ -229,39 +234,23 @@ if __name__ == "__main__":
             print("Step %d, Total loss %0.6f" % (step, loss))
             print()
 
-            plot_feats(original_img_tensor, 
-                    downsampler(model_output_in_matrix, None)[0, ...], 
-                    model_output_in_matrix[0, ...])
-            
-            plot_feats(original_img_tensor, 
-                    lr_feat_ground_truth_in_matrix[0, ...], 
-                    predicted_lr_feat_in_matrix[0, ...])
+            if do_plot:
+                plot_feats(original_img_tensor, 
+                        downsampler(model_output_in_matrix, None)[0, ...], 
+                        model_output_in_matrix[0, ...])
+                
+                plot_feats(original_img_tensor, 
+                        lr_feat_ground_truth_in_matrix[0, ...], 
+                        predicted_lr_feat_in_matrix[0, ...])
 
         optim.zero_grad()
         loss.backward()
         optim.step()#
 
+    return model_output_in_matrix[0, ...]
+
+if __name__ == "__main__":
+    cameraman = ImageFittingColorFeat(224)
+    trained_hr_feat = train_featup(cameraman, do_plot=True)
 
     
-    
-
-
-
-
-
-    # step 6: apply the transformations to the high-res model output
-    # and get the high-res feature in shape of (batch_size, 224, 224, feat_dim)
-
-
-    
-    # step 7: downsample the jittered high-res feature to the low-res feature size
-    # (batch_size, 14, 14, feat_dim)
-
-    # step 8: calculate the loss between the daonsampled low-res feature and
-    #  the ground truth low-res feature
-
-    # step 9: backpropagate the loss and update the parameters of the Siren model
-
-    # step 10: repeat the above steps for a few epochs
-
-    # step 11: save the trained Siren model
