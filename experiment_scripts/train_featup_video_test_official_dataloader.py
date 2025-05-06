@@ -17,7 +17,11 @@ class VideoAndFlowFitting(Dataset):
         self.data_path = data_path
         self.video_dict = torch.load(data_path)
         self.flow_fields = self.video_dict['flow_fields'] # currently (f, 2, h, w)
-        self.video_frames = self.video_dict['video_frames'].unsqueeze(1) # make it (f, 1, h, w)
+        self.video_frames = self.video_dict['video_frames']
+
+        if len(self.video_frames.shape) == 3: # make it (f, 1, h, w)
+            self.video_frames = self.video_frames.unsqueeze(1)
+
         self.source_image = self.video_dict['source_image']
         self.motion_type = self.video_dict['motion_type']
 
@@ -87,11 +91,12 @@ if __name__ == "__main__":
     import modules, utils, loss_functions, training
     from functools import partial
 
-    model = modules.SingleBVPNet(type="sine", in_features=3, 
+    model = modules.SingleBVPNet(type="sine", 
+                                 in_features=3, 
                                  out_features=vid_dataset.channels,
-                                mode='mlp', 
-                                hidden_features=1024, 
-                                num_hidden_layers=3)
+                                 mode='mlp', 
+                                 hidden_features=1024, 
+                                 num_hidden_layers=3)
     model.cuda()
 
     logging_root = './logs'
