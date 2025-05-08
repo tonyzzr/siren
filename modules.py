@@ -1,3 +1,12 @@
+
+import os, sys
+WORK_SPACE = os.path.dirname(os.path.abspath(__file__))
+if WORK_SPACE not in sys.path:
+    sys.path.append(WORK_SPACE)
+print(f"SIREN_MODEL_WORK_SPACE: {WORK_SPACE}")
+
+
+
 import torch
 from torch import nn
 from torchmeta.modules import (MetaModule, MetaSequential)
@@ -6,6 +15,8 @@ import numpy as np
 from collections import OrderedDict
 import math
 import torch.nn.functional as F
+
+
 
 
 class BatchLinear(nn.Linear, MetaModule):
