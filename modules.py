@@ -1,4 +1,3 @@
-
 import os, sys
 WORK_SPACE = os.path.dirname(os.path.abspath(__file__))
 if WORK_SPACE not in sys.path:
@@ -155,8 +154,13 @@ class SingleBVPNet(MetaModule):
         if params is None:
             params = OrderedDict(self.named_parameters())
 
+        preserve_coord_graph = model_input.get('preserve_coord_graph', False)
+
         # Enables us to compute gradients w.r.t. coordinates
-        coords_org = model_input['coords'].clone().detach().requires_grad_(True)
+        if preserve_coord_graph and model_input['coords'].requires_grad:
+            coords_org = model_input['coords'] # Use directly
+        else:
+            coords_org = model_input['coords'].clone().detach().requires_grad_(True)
         coords = coords_org
 
         # various input processing methods for different applications

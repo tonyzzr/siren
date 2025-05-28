@@ -110,7 +110,6 @@ def prepare_lr_feat_ground_truth(dino_backbone,
 
     return lr_feat_ground_truth_in_matrix, transform_params
 
-
 class ImageFittingColorFeat(Dataset):
     '''
         (x, y, r, g, b) as model input, shape: (1, 224*224, 5)

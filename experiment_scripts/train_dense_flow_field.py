@@ -44,7 +44,7 @@ if __name__ == "__main__":
     # mock_video_data_path = f'{WORK_DIR}/data/mock_videos/translation_h.pt'
     # mockvideo = VideoAndFlowFitting(data_path=mock_video_data_path)
 
-    vid_dataset = dataio.Video('data/mock_videos/mockvideo_vid_data.npy')
+    vid_dataset = dataio.Video(f'{WORK_DIR}/data/mock_videos/mockvideo_vid_data.npy')
     print("vid_dataset.shape: (f, h, w) ", vid_dataset.shape)
 
     pixel_coords = dataio.get_mgrid(vid_dataset.shape, dim=3)
@@ -299,6 +299,8 @@ if __name__ == "__main__":
             for ax in axes.flatten():
                 ax.axis('off')
             
+            
+            os.makedirs(f'{WORK_DIR}/logs/dense_flow_field_test/checkpoints', exist_ok=True)
             plt.savefig(f'{WORK_DIR}/logs/dense_flow_field_test/checkpoints/epoch_{epoch}.png')
             plt.show()
             print("************************************************")
